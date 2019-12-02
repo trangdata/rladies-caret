@@ -47,6 +47,7 @@ beer <- vroom::vroom('data/beer-ratings.csv') %>%
       'user_profileName'
     )
   ) %>% 
+  filter(beer_abv > 3) %>% 
   mutate(beer_style = as.factor(beer_style)) %>% 
   sample_n(1000)
 
@@ -97,12 +98,24 @@ Visit https://rdrr.io/cran/ggfortify/man/autoplot.pca_common.html to see what pa
 ## Build machine learning models
 What do we want to predict?
 
+First we take a quick look at the distribution of ABV:
+
+```{r abv_viz}
+beer %>%
+  ggplot(aes(review_overall)) +
+  geom_histogram()
+
+beer %>%
+  ggplot(aes(beer_abv)) +
+  geom_histogram()
+```
+
 ```{r split_data}
 data_abv <- beer %>%
   select(
     beer_abv,
-    brewer_id,
-    beer_style,
+    # brewer_id,
+    # beer_style,
     review_overall,
     review_appearance,
     review_aroma,
@@ -117,13 +130,7 @@ data_df_test <- data_abv[-train_idx, ]
 
 ```
 
-First we take a quick look at the distribution of ABV:
 
-```{r abv_viz}
-beer %>%
-  ggplot(aes(beer_abv)) +
-  geom_histogram()
-```
 
 ### Introduction to caret
 
@@ -134,7 +141,7 @@ system.time(
   svm_fit <- train(
     beer_abv ~ .,
     data_df_train,
-    method = 'svmRadial',
+    method = 'svmLinear',
     trControl = no_ctrl
   )
 )
@@ -147,12 +154,12 @@ data.frame(ypred = svm_pred, ytest = data_df_test$beer_abv) %>%
   ggplot(aes(ypred, ytest)) +
   geom_point(shape = 21) +
   geom_abline(color = 'grey50') +
+  coord_fixed() +
   labs(x = 'Predicted score', y = 'True score')
 
 # How did the model do? 
 cor(svm_pred, data_df_test$beer_abv)
 ```
-Why is the fit so poor?
 
 
 ### Hyperparameter tuning
@@ -181,6 +188,7 @@ data.frame(ypred = svm_pred, ytest = data_df_test$beer_abv) %>%
   ggplot(aes(ypred, ytest)) +
   geom_point(shape = 21) +
   geom_abline(color = 'grey50') +
+  coord_fixed() +
   labs(x = 'Predicted ABV', y = 'True ABV')
 
 cor(svm_pred, data_df_test$beer_abv)
