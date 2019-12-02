@@ -2,10 +2,6 @@
 title: "Using caret to streamline the model building process"
 output: html_document
 ---
----
-title: 'Predict customer beering'
-output: html_document
----
 
 ```{r setup}
 library(caret)
@@ -115,7 +111,7 @@ data_abv <- beer %>%
     user_ageInSeconds
   )
 
-train_idx <- createDataPartition(data_abv$review_overall, p = 0.8, list = FALSE, times = 1)
+train_idx <- createDataPartition(data_abv$beer_abv, p = 0.8, list = FALSE, times = 1)
 data_df_train <- data_abv[train_idx, ]
 data_df_test <- data_abv[-train_idx, ]
 
@@ -191,6 +187,8 @@ cor(svm_pred, data_df_test$beer_abv)
 ```
 
 ### Exercise: How about a different machine learning model, like random forest?
+Check out all the methods caret include here: https://topepo.github.io/caret/train-models-by-tag.html.
+
 Is it better?
 
 ```{r ex2}
@@ -257,23 +255,19 @@ words_10 <- data_counts %>%
 
 We will now reduce our data_counts data frame to these words and cast it to a document term matrix (a mathematical matrix that describes the frequency of terms that occur in a collection of documents.)
 `cast_dtm` helps cast a *tidy* one-term-per-document-per-row data frame into a DocumentTermMatrix.
+We also create a meta data frame that is similar to original dataset.
 
 ```{r data_dtm}
 data_dtm <- data_counts %>%
   right_join(words_10, by = 'word') %>%
   bind_tf_idf(word, index, n) %>%
   cast_dtm(index, word, tf_idf)
-```
-
-This leaves us with 80+ features (words). 
-We create a meta data frame that is similar to original dataset but likely with some reviews removed after word reduction.
-
-```{r meta}
 meta <- tibble(index = as.numeric(dimnames(data_dtm)[[1]])) %>%
   left_join(beer[!duplicated(beer$index), ], by = 'index')
 ```
 
-Splitting the data into a training and test set:
+This leaves us with 80+ features (words). 
+We now split the data into a training and test set.
 
 ```{r train_idx}
 data_df_train <- data_dtm[train_idx, ] %>% as.matrix() %>% as.data.frame()
@@ -300,7 +294,9 @@ system.time(
   svm_fit <- train(
     x = data_df_train,
     y = response_train,
-    method = 'svmLinear',
+    method = 'svmRadial',
+    # metric = 'Rsquared',
+    # preProc = c('center', 'scale'),
     trControl = no_ctrl
   )
 )
@@ -341,3 +337,32 @@ varImp(svm_fit)$importance %>%
   geom_point() + coord_flip() + theme_bw() +
   labs(x = NULL, y = 'Importance')
 ```
+
+## Other exploratory questions
+https://www.linkedin.com/pulse/how-hire-test-data-skills-one-size-fits-all-interview-tanya-cashorali/
+
+Which are the most reviewed beers?
+Which are the most reviewed breweries?
+Which brewery produces the strongest beers by ABV?
+If you had to pick 3 beers to recommend using only this data, which would you pick?
+Which of the factors (aroma, taste, appearance, palette) are most important in determining the overall quality of a beer?
+Lastly, if I typically enjoy a beer due to its aroma and appearance, which beer style should I try?
+
+See more here:
+https://www.ahoulette.com/2019/03/11/beer-advocate-reviews/
+
+
+```{r}
+# common_styles %>%
+#   group_by(beer_style) %>%
+#   summarise(
+#     mean_taste = mean(review_taste),
+#     mean_apperance = mean(review_appearance),
+#     mean_overall = mean(review_overall)
+#   ) %>%
+#   pivot_longer(-1, names_to = 'criterion', values_to = 'score') %>%
+#   ggplot(aes(x =  ______, y =  ______, color =  _______)) +
+#   geom_point() +
+#   coord_flip() 
+```
+
