@@ -1,0 +1,343 @@
+---
+title: "Using caret to streamline the model building process"
+output: html_document
+---
+---
+title: 'Predict customer beering'
+output: html_document
+---
+
+```{r setup}
+library(caret)
+library(tidyverse)
+library(tidytext)
+
+theme_set(theme_bw())
+```
+
+https://www.kaggle.com/c/beer-ratings/data
+
+This dataset was downloaded from Kaggle.
+The data span a period of more than 10 years, including almost 40,000 reviews up to November 2011.
+We will only look at 1,000 random reviews today.
+Each review includes ratings in terms of five *aspects*: appearance, aroma, palate, taste, and overall impression.
+Reviews include product and user information, followed by each of these five ratings, and a plaintext review.
+
+```{r read_data}
+set.seed(1618)
+beer <- vroom::vroom('data/beer-ratings.csv') %>%
+  filter(complete.cases(.)) %>%
+  droplevels() %>%
+  `colnames<-` (
+    c(
+      'index',
+      'beer_abv',
+      'beer_id',
+      'brewer_id',
+      'beer_name',
+      'beer_style',
+      'review_appearance',
+      'review_aroma',
+      'review_overall',
+      'review_palate',
+      'review_taste',
+      'review_text',
+      'review_timeStruct',
+      'review_timeUnix',
+      'user_ageInSeconds',
+      'user_birthdayRaw',
+      'user_birthdayUnix',
+      'user_gender',
+      'user_profileName'
+    )
+  ) %>% 
+  mutate(beer_style = as.factor(beer_style)) %>% 
+  sample_n(1000)
+
+skimr::skim(beer)
+```
+
+## Principal Component Analysis
+
+Let's first perform a Principal Component Analysis (PCA) on a few variables.
+
+```{r pca}
+library(ggfortify)
+common_styles <- beer %>%
+  add_count(beer_style) %>%
+  filter(n >= 50)
+
+beer_pca <- common_styles %>%
+  select(
+    beer_abv,
+    review_appearance,
+    review_aroma,
+    review_overall,
+    review_palate,
+    review_taste
+  ) %>% 
+  prcomp()
+
+autoplot(beer_pca, data = common_styles, colour = 'beer_style')
+```
+
+### Exercise: What if we want to plot principal component 1 vs. 3?
+How about the loadings of each variable on the components?
+
+Visit https://rdrr.io/cran/ggfortify/man/autoplot.pca_common.html to see what parameters we can set.
+
+```{r ex1}
+# autoplot(
+#   prcomp(k_mat),
+#   x =  _____,
+#   y =  _____,
+#   data = common_styles,
+#   colour = 'beer_style',
+#   loadings = _____,
+#   loadings.label = _____
+# )
+```
+
+## Build machine learning models
+What do we want to predict?
+
+```{r split_data}
+data_abv <- beer %>%
+  select(
+    beer_abv,
+    brewer_id,
+    beer_style,
+    review_overall,
+    review_appearance,
+    review_aroma,
+    review_palate,
+    review_taste,
+    user_ageInSeconds
+  )
+
+train_idx <- createDataPartition(data_abv$review_overall, p = 0.8, list = FALSE, times = 1)
+data_df_train <- data_abv[train_idx, ]
+data_df_test <- data_abv[-train_idx, ]
+
+```
+
+First we take a quick look at the distribution of ABV:
+
+```{r abv_viz}
+beer %>%
+  ggplot(aes(beer_abv)) +
+  geom_histogram()
+```
+
+### Introduction to caret
+
+```{r svm}
+no_ctrl <- trainControl(method = 'none') # No resampling
+
+system.time(
+  svm_fit <- train(
+    beer_abv ~ .,
+    data_df_train,
+    method = 'svmRadial',
+    trControl = no_ctrl
+  )
+)
+
+svm_fit$finalModel
+svm_pred <- predict(svm_fit, newdata = data_df_test)
+
+# Plot true ABV vs. predicted ABV:
+data.frame(ypred = svm_pred, ytest = data_df_test$beer_abv) %>%
+  ggplot(aes(ypred, ytest)) +
+  geom_point(shape = 21) +
+  geom_abline(color = 'grey50') +
+  labs(x = 'Predicted score', y = 'True score')
+
+# How did the model do? 
+cor(svm_pred, data_df_test$beer_abv)
+```
+Why is the fit so poor?
+
+
+### Hyperparameter tuning
+
+Can we improve this result by tuning the hyperparameters?
+Let's go ahead and run the following code before we talk about it.
+
+```{r svm_tuned}
+train_ctrl <- trainControl(method = 'repeatedcv',
+                           number = 5,
+                           repeats = 5)
+
+system.time(
+  svm_fit <- train(
+    beer_abv ~ .,
+    data_df_train,
+    method = 'svmRadial',
+    trControl = train_ctrl
+  )
+)
+
+svm_fit$finalModel
+svm_pred <- predict(svm_fit, newdata = data_df_test)
+
+data.frame(ypred = svm_pred, ytest = data_df_test$beer_abv) %>% 
+  ggplot(aes(ypred, ytest)) +
+  geom_point(shape = 21) +
+  geom_abline(color = 'grey50') +
+  labs(x = 'Predicted ABV', y = 'True ABV')
+
+cor(svm_pred, data_df_test$beer_abv)
+```
+
+### Exercise: How about a different machine learning model, like random forest?
+Is it better?
+
+```{r ex2}
+# rf_grid <-  expand.grid(mtry = 9,
+#                         splitrule = 'variance',
+#                         min.node.size = 5)
+# 
+# system.time(
+#   rf_fit <- train(
+#     beer_abv ~ .,
+#     data_df_train,
+#     method = ________,
+#     tuneGrid = rf_grid,
+#     trControl = no_ctrl
+#   )
+# )
+# rf_fit
+# rf_pred <- predict(rf_fit, newdata = data_df_test)
+# 
+# # How did the model do?
+# cor(rf_pred, response_test)
+```
+
+Note: 
+We would have to set `importance = 'impurity'` in the `train()` function to obtain *feature importance*.
+
+### Exercise: What if we want to predict the overall rating, *i.e.* `review_overall`?
+
+
+## Can we predict ABV from review text? 
+
+Review text is rich. 
+Why?
+
+Reference for this section of code:
+https://www.hvitfeldt.me/blog/binary-text-classification-with-tidytext-and-caret/
+
+```{r get_text}
+abv_text <- beer %>%
+  select(index, review_text, beer_abv)
+```
+
+We will use the [bag-of-words](https://en.wikipedia.org/wiki/Bag-of-words_model) representation to count the number of times each [n-gram](https://en.wikipedia.org/wiki/N-gram) (group of words) appears in each tweet disregarding grammar and even word order (mostly).
+
+First, we will remove all the *stop words* (common words that usually don't carry meaning) to save unnecessary computation time.
+We're technically performing feature selection manually.
+Let's also consider only *unigrams*.
+
+```{r data_counts}
+data_counts <-
+  unnest_tokens(abv_text, word, review_text, token = 'ngrams', n = 1) %>%
+  anti_join(stop_words, by = 'word') %>%
+  count(index, word, sort = TRUE)
+```
+
+Now, we consider words appearing in at least 100 different reviews.
+
+```{r words_10}
+words_10 <- data_counts %>%
+  count(word) %>%
+  filter(n >= 100) %>%
+  select(word)
+```
+
+We will now reduce our data_counts data frame to these words and cast it to a document term matrix (a mathematical matrix that describes the frequency of terms that occur in a collection of documents.)
+`cast_dtm` helps cast a *tidy* one-term-per-document-per-row data frame into a DocumentTermMatrix.
+
+```{r data_dtm}
+data_dtm <- data_counts %>%
+  right_join(words_10, by = 'word') %>%
+  bind_tf_idf(word, index, n) %>%
+  cast_dtm(index, word, tf_idf)
+```
+
+This leaves us with 80+ features (words). 
+We create a meta data frame that is similar to original dataset but likely with some reviews removed after word reduction.
+
+```{r meta}
+meta <- tibble(index = as.numeric(dimnames(data_dtm)[[1]])) %>%
+  left_join(beer[!duplicated(beer$index), ], by = 'index')
+```
+
+Splitting the data into a training and test set:
+
+```{r train_idx}
+data_df_train <- data_dtm[train_idx, ] %>% as.matrix() %>% as.data.frame()
+data_df_test <- data_dtm[-train_idx, ] %>% as.matrix() %>% as.data.frame()
+response_train <- meta$beer_abv[train_idx]
+response_test <- meta$beer_abv[-train_idx]
+```
+
+Now each row in the data.frame is a document/review.  
+
+## Modeling
+
+Now that we have the data all clean and tidy we will turn our heads towards modeling. We will be using the wonderful `caret` package which we will use to employ [Support vector machine](https://en.wikipedia.org/wiki/Support_vector_machine).
+
+### SVM
+
+The first model will be the `svmLinear` model from the [kernlab](https://cran.r-project.org/web/packages/kernlab/index.html) package. Where we specify default parameters.
+First time around we will not use a resampling method.
+
+```{r svm_fit}
+no_ctrl <- trainControl(method = 'none') # No resampling
+
+system.time(
+  svm_fit <- train(
+    x = data_df_train,
+    y = response_train,
+    method = 'svmLinear',
+    trControl = no_ctrl
+  )
+)
+
+svm_fit
+```
+
+The *model fitting* process is complete.
+We now use the fitted model to predict the outcome (ABV or overall score) on the test data set and visualize the results.
+
+```{r svm_pred}
+svm_pred <- predict(svm_fit, newdata = data_df_test)
+
+# Let's plot the true ABV vs. predicted ABV:
+data.frame(svm_pred, response_test) %>% 
+  ggplot(aes(svm_pred, response_test)) +
+  geom_point(shape = 21) +
+  scale_y_continuous(breaks = seq(4, 14, 2)) +
+  coord_fixed() + geom_abline(color = 'grey50') + theme_bw() +
+  labs(x = 'Predicted ABV', y = 'True ABV')
+
+cor(svm_pred, response_test) # how correlated are the two vectors
+plot(varImp(svm_fit)) # caret's default feature importance plot
+
+# Let's zoom in the top 10 (the column `Overall` means importance):
+varImp(svm_fit)$importance %>% 
+  rownames_to_column('feature') %>% 
+  top_n(10) %>% 
+  ggplot(aes(fct_reorder(feature, Overall), Overall)) +
+  geom_point() + coord_flip() + theme_bw() +
+  labs(x = NULL, y = 'Importance')
+
+# What about the bottom 10:
+varImp(svm_fit)$importance %>% 
+  rownames_to_column('feature') %>% 
+  top_n(-10) %>% 
+  ggplot(aes(fct_reorder(feature, Overall), Overall)) +
+  geom_point() + coord_flip() + theme_bw() +
+  labs(x = NULL, y = 'Importance')
+```
