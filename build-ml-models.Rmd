@@ -84,15 +84,15 @@ How about the loadings of each variable on the components?
 Visit https://rdrr.io/cran/ggfortify/man/autoplot.pca_common.html to see what parameters we can set.
 
 ```{r ex1}
-# autoplot(
-#   prcomp(k_mat),
-#   x =  _____,
-#   y =  _____,
-#   data = common_styles,
-#   colour = 'beer_style',
-#   loadings = _____,
-#   loadings.label = _____
-# )
+autoplot(
+  beer_pca,
+  x =  1,
+  y =  2,
+  data = common_styles,
+  colour = 'beer_style',
+  loadings = TRUE,
+  loadings.label = TRUE
+)
 ```
 
 ## Build machine learning models
